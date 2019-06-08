@@ -152,6 +152,7 @@ typedef struct NSVGshape
 	unsigned char flags;		// Logical or of NSVG_FLAGS_* flags
 	float bounds[4];			// Tight bounding box of the shape [minx,miny,maxx,maxy].
 	NSVGpath* paths;			// Linked list of paths in the image.
+	char* imageData;			// TODO: move after next to keep compatibility
 	struct NSVGshape* next;		// Pointer to next shape, or NULL if last element.
 } NSVGshape;
 
@@ -961,7 +962,7 @@ static void nsvg__addShape(NSVGparser* p)
 	shape->miterLimit = attr->miterLimit;
 	shape->fillRule = attr->fillRule;
 	shape->opacity = attr->opacity;
-
+	shape->imageData = NULL;
 	shape->paths = p->plist;
 	p->plist = NULL;
 
@@ -2397,6 +2398,78 @@ static void nsvg__parseCircle(NSVGparser* p, const char** attr)
 	}
 }
 
+static char *nsvg__strndup(const char *s, size_t n)
+{
+	char *result;
+	size_t len = strlen(s);
+
+	if (n < len)
+		len = n;
+
+	result = (char *)malloc(len + 1);
+	if (!result)
+		return 0;
+
+	result[len] = '\0';
+	return (char *)memcpy(result, s, len);
+}
+
+static void nsvg__parseImage(NSVGparser* p, const char** attr)
+{
+	float x = 0.0f;
+	float y = 0.0f;
+	float w = 0.0f;
+	float h = 0.0f;
+	int i;
+	char* imageData = NULL;
+
+	for (i = 0; attr[i]; i += 2)
+	{
+		if (!nsvg__parseAttr(p, attr[i], attr[i + 1]))
+		{
+			if (strcmp(attr[i], "x") == 0)
+            {
+              x = nsvg__parseCoordinate(p, attr[i+1], nsvg__actualOrigX(p), nsvg__actualWidth(p));
+            }
+			else if (strcmp(attr[i], "y") == 0)
+            {
+              y = nsvg__parseCoordinate(p, attr[i+1], nsvg__actualOrigY(p), nsvg__actualHeight(p));
+            }
+			else if (strcmp(attr[i], "width") == 0)
+			{
+				w = nsvg__parseCoordinate(p, attr[i + 1], 0.0f, 0.0f);
+			}
+			else if (strcmp(attr[i], "height") == 0)
+			{
+				h = nsvg__parseCoordinate(p, attr[i + 1], 0.0f, 0.0f);
+            }
+			else if (strcmp(attr[i], "xlink:href") == 0)
+            {
+			  const char* start = attr[i + 1];
+			  while(*start && strncmp(start, "base64", 6))
+			  {
+			    start++;
+			  }
+			  imageData = nsvg__strndup(start+7, strlen(start+7));
+            }
+		}
+	}
+
+	if (w != 0.0f && h != 0.0f)
+	{
+		nsvg__resetPath(p);
+
+        nsvg__moveTo(p, x, y);
+        nsvg__lineTo(p, x, y+h);
+        nsvg__lineTo(p, x+w, y+h);
+        nsvg__lineTo(p, x+w, y);
+
+		nsvg__addPath(p, 1);
+		nsvg__addShape(p);
+		p->shapesTail->imageData = imageData;
+	}
+}
+
 static void nsvg__parseEllipse(NSVGparser* p, const char** attr)
 {
 	float cx = 0.0f;
@@ -2719,6 +2792,10 @@ static void nsvg__startElement(void* ud, const char* el, const char** attr)
 		p->defsFlag = 1;
 	} else if (strcmp(el, "svg") == 0) {
 		nsvg__parseSVG(p, attr);
+	} else if (strcmp(el, "image") == 0) {
+		nsvg__pushAttr(p);
+		nsvg__parseImage(p, attr);
+		nsvg__popAttr(p);
 	}
 }
 
@@ -2954,6 +3031,18 @@ error:
         free(res);
     }
     return NULL;
+}
+
+void nsvgDeleteShape(NSVGshape* shape)
+{
+	nsvg__deletePaths(shape->paths);
+	nsvg__deletePaint(&shape->fill);
+	nsvg__deletePaint(&shape->stroke);
+	if(shape->imageData)
+	{
+		free(shape->imageData);
+	}
+	free(shape);
 }
 
 void nsvgDelete(NSVGimage* image)
