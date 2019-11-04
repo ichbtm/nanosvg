@@ -152,8 +152,8 @@ typedef struct NSVGshape
 	unsigned char flags;		// Logical or of NSVG_FLAGS_* flags
 	float bounds[4];			// Tight bounding box of the shape [minx,miny,maxx,maxy].
 	NSVGpath* paths;			// Linked list of paths in the image.
-	char* imageData;			// TODO: move after next to keep compatibility
 	struct NSVGshape* next;		// Pointer to next shape, or NULL if last element.
+	char* imageData;			// note: moved after next to keep compatibility
 } NSVGshape;
 
 typedef struct NSVGimage
